@@ -1,25 +1,47 @@
 #!/usr/bin/python
-import sys, os
+import sys
+import os
 
 sys.path.append(os.path.abspath(os.path.join(__file__, os.pardir, os.pardir)))
-import config, re, time, json, requests
+import config
+import re
+import time
+import json
+import requests
 from datetime import datetime
 import pandas as pd
+# import numpy as np
 
 pd.set_option('expand_frame_repr', False)  # 当列太多时不换行
 start = time.perf_counter()
+headers1 = {
+    "Accept": "*/*",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6,zh-TW;q=0.5",
+    "Connection": "keep-alive",
+    "Host": "hq.sinajs.cn",
+    "Referer": "https://finance.sina.com.cn/realstock/company/sh000001/nc.shtml",
+    "Sec-Fetch-Dest": "script",
+    "Sec-Fetch-Mode": "no-cors",
+    "Sec-Fetch-Site": "cross-site",
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36 Edg/108.0.1462.46",
+    "sec-ch-ua": 'Not?A_Brand";v="8", "Chromium";v="108", "Microsoft Edge";v="108"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": "macOS",
+}
+headers2 = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36 Edg/108.0.1462.46",
+}
 
 
-def get_content_from_internet(url, max_try_num=10, sleep_time=5):
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.88 Safari/537.36"
-    }
+def get_content_from_internet(url, hds, max_try_num=10, sleep_time=5):
+
     # 抓取函数
     get_success = False  # 是否成功抓取到内容
     # 抓取内容
     for i in range(max_try_num):
         try:
-            content = requests.get(url=url, timeout=10).text
+            content = requests.get(url=url, timeout=10, headers=hds).text
             get_success = True  # 成功抓取到内容
             break
         except Exception as e:
@@ -39,15 +61,16 @@ def get_today_data_from_sinajs(code_list):
     url = "http://hq.sinajs.cn/list=" + ",".join(code_list)
 
     # 抓取数据
-    content = get_content_from_internet(url)
+    content = get_content_from_internet(url, headers1)
     # content = content.decode('gbk')
 
     # 将数据转换成DataFrame
     content = content.strip()  # 去掉文本前后的空格、回车等
     data_line = content.split('\n')  # 每行是一个股票的数据
     data_line = [i.replace('var hq_str_', '').split(',') for i in data_line]
-    df = pd.DataFrame(data_line, dtype='float')
-
+    df = pd.DataFrame(data_line)
+    # print(df)
+    # exit()
     # 对DataFrame进行整理
     df[0] = df[0].str.split('="')
     df['code'] = df[0].str[0].str.strip()
@@ -61,7 +84,7 @@ def get_today_data_from_sinajs(code_list):
     df['status'] = df['status'].astype(str).str.strip('";')
     df = df[['code', 'candle_end_time', 'open', 'high', 'low', 'close', 'pre_close', 'volume',
              'money', 'buy1', 'sell1', 'status']]
-
+    print(df)
     return df
 
 
@@ -71,7 +94,7 @@ def is_today_trading_day():
     # 获取上证指数今天的数据
     df = get_today_data_from_sinajs(code_list=['sh000001'])
     sh_date = df.iloc[0]['candle_end_time']  # 上证指数最近交易日
-
+    print(df)
     # 判断今天日期和sh_date是否相同
     return datetime.now().date() == sh_date.date()
 
@@ -102,7 +125,8 @@ def get_all_today_stock_data_from_sina_marketcenter():
         print('开始抓取页数：', page_num)
 
         # 抓取数据
-        content = get_content_from_internet(url)
+        content = get_content_from_internet(url, headers2)
+        # print(content)
 
         # 判断页数是否为空
         if eval(content) == []:
@@ -114,7 +138,9 @@ def get_all_today_stock_data_from_sina_marketcenter():
         # 将数据转换成dict格式
         content = json.loads(content)
         # 将数据转换成DataFrame格式
-        df = pd.DataFrame(content, dtype='float')
+        df = pd.DataFrame(content)
+        df['open'] = df['open'].apply(pd.to_numeric, errors='coerce')
+        # print(df)
 
         # 对数据进行整理
         # 重命名
@@ -130,7 +156,8 @@ def get_all_today_stock_data_from_sina_marketcenter():
 
         df['turnover'] = df['turnover'].apply(lambda x: x * 0.01)
         df['change'] = df['change'].apply(lambda x: x * 0.01)
-        df['traded_market_value'] = df['traded_market_value'].apply(lambda x: x * (10 ** 4))
+        df['traded_market_value'] = df['traded_market_value'].apply(
+            lambda x: x * (10 ** 4))
         df['market_value'] = df['market_value'].apply(lambda x: x * (10 ** 4))
 
         # # 后复权
@@ -153,31 +180,31 @@ def get_all_today_stock_data_from_sina_marketcenter():
                  'buy1', 'sell1']]
 
         # 合并数据
-        all_df = all_df.append(df, ignore_index=True)
-
+        # all_df = all_df.append(df, ignore_index=True)
+        all_df = all_df.from_records(df)
+        print(all_df)
         # 将页数+1
         page_num += 1
         time.sleep(1)
 
-        # break
-
+        break
+    # print(all_df['open'].dtypes)
     # ===删除当天停盘的股票
     all_df = all_df[all_df['open'] - 0 >= 0.00001]
     all_df.reset_index(drop=True, inplace=True)
-
     return all_df
 
 
 if __name__ == '__main__':
     # 判断今天是否是交易日
-    if is_today_trading_day() is False:
-        print('今天不是交易日，不需要更新股票数据，退出程序')
-        exit()
+    # if is_today_trading_day() is False:
+    #     print('今天不是交易日，不需要更新股票数据，退出程序')
+    #     exit()
 
     # 判断当前时间是否超过15点
-    if datetime.now().hour < 15:  # 保险起见可以小于16点
-        print('今天股票尚未收盘，不更新股票数据，退出程序')
-        exit()
+    # if datetime.now().hour < 15:  # 保险起见可以小于16点
+    #     print('今天股票尚未收盘，不更新股票数据，退出程序')
+    #     exit()
 
     # 获取今天所有的股票数据
     df = get_all_today_stock_data_from_sina_marketcenter()
@@ -188,7 +215,8 @@ if __name__ == '__main__':
         stock_code = t.iloc[0]['code']
 
         # 构建存储文件路径
-        path_csv = os.path.join(config.input_data_path, 'stock_data', stock_code + '.csv')
+        path_csv = os.path.join(config.input_data_path,
+                                'stock_data', stock_code + '.csv')
         # 文件存在，不是新股
         if os.path.exists(path_csv):
             t.to_csv(path_csv, index=False, header=None, mode='a')
